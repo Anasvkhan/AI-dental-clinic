@@ -1,0 +1,11 @@
+{
+  "tools": {
+    "get_clinic_info": "3e5e2a28-530c-4bc4-ae97-970873dd6d1d",
+    "check_availability": "023a30fc-4801-4b18-9586-4c04580b770b",
+    "book_appointment": "93a6117c-ef7b-44c1-94db-3895767a2a4f",
+    "get_patient_appointments": "3e2a681f-fa07-4262-b46c-a805023d11de",
+    "reschedule_appointment": "cbaeba3f-a325-41d3-b7f3-0ada564273dc",
+    "cancel_appointment": "9fc92962-87fd-413f-a5ed-7d5136b3cd15"
+  },
+  "assistant": "1e9756fc-b18e-468b-90ac-12c3b2c33fbe"
+}

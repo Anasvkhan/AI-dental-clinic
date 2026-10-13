@@ -1,0 +1,17 @@
+# Secrets (keys live in these files; add them in Vercel instead)
+.env
+.env*
+vapi/.env
+
+# Dependencies and build output
+node_modules/
+.next/
+out/
+build/
+__pycache__/
+*.tsbuildinfo
+next-env.d.ts
+
+# OS / editor
+.DS_Store
+.vercel

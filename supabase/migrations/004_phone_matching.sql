@@ -1,0 +1,214 @@
+-- Match patients on the last 10 digits of their phone, so "+1 (555) 000-1111",
+-- "15550001111" and "555-000-1111" are the same person.
+
+create or replace function public.phone_key(p_phone text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select right(regexp_replace(coalesce(p_phone, ''), '[^0-9]', '', 'g'), 10);
+$$;
+
+alter table public.patients drop constraint patients_phone_key;
+alter table public.patients
+  add column phone_key text generated always as (right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)) stored;
+alter table public.patients add constraint patients_phone_key_unique unique (phone_key);
+
+create or replace function public.book_appointment(
+  p_full_name text,
+  p_phone text,
+  p_service text,
+  p_start_local timestamp,
+  p_dentist_id uuid default null,
+  p_notes text default null,
+  p_vapi_call_id text default null
+)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_tz text;
+  v_svc public.services;
+  v_phone text := public.normalize_phone(p_phone);
+  v_start timestamptz;
+  v_end timestamptz;
+  v_dentist_id uuid;
+  v_dentist_name text;
+  v_patient_id uuid;
+  v_appt_id uuid;
+begin
+  if length(public.phone_key(p_phone)) < 7 then
+    return jsonb_build_object('success', false, 'message', 'A valid phone number is required to book.');
+  end if;
+
+  select c.timezone into v_tz from public.clinic_settings c where c.id;
+
+  v_svc := public.find_service(p_service);
+  if v_svc.id is null then
+    return jsonb_build_object('success', false, 'message', format('We do not offer a service called "%s".', p_service));
+  end if;
+
+  v_start := p_start_local at time zone v_tz;
+  v_end := v_start + make_interval(mins => v_svc.duration_min);
+
+  if v_start <= now() then
+    return jsonb_build_object('success', false, 'message', 'That time has already passed. Please choose a future time.');
+  end if;
+
+  -- First dentist who works at that time and has no overlapping booking
+  select d.id, d.full_name into v_dentist_id, v_dentist_name
+  from public.dentists d
+  join public.working_hours wh on wh.dentist_id = d.id
+  where d.is_active
+    and (p_dentist_id is null or d.id = p_dentist_id)
+    and wh.weekday = extract(dow from p_start_local)
+    and p_start_local::time >= wh.start_time
+    and (p_start_local + make_interval(mins => v_svc.duration_min))::time <= wh.end_time
+    and not exists (
+      select 1 from public.appointments a
+      where a.dentist_id = d.id
+        and a.status = 'booked'
+        and tstzrange(a.starts_at, a.ends_at) && tstzrange(v_start, v_end)
+    )
+  order by d.full_name
+  limit 1;
+
+  if v_dentist_id is null then
+    return jsonb_build_object('success', false, 'message', 'No dentist is available at that time. Please check availability for another time.');
+  end if;
+
+  -- Find or create the patient by phone; an existing patient keeps their stored name and number
+  insert into public.patients (full_name, phone)
+  values (trim(p_full_name), v_phone)
+  on conflict (phone_key) do update set phone = public.patients.phone
+  returning id into v_patient_id;
+
+  begin
+    insert into public.appointments (patient_id, dentist_id, service_id, starts_at, ends_at, notes, vapi_call_id)
+    values (v_patient_id, v_dentist_id, v_svc.id, v_start, v_end, p_notes, p_vapi_call_id)
+    returning id into v_appt_id;
+  exception when exclusion_violation then
+    return jsonb_build_object('success', false, 'message', 'That slot was just taken. Please choose another time.');
+  end;
+
+  return jsonb_build_object(
+    'success', true,
+    'appointment_id', v_appt_id,
+    'patient_id', v_patient_id,
+    'dentist', v_dentist_name,
+    'service', v_svc.name,
+    'start_local', to_char(p_start_local, 'YYYY-MM-DD HH24:MI'),
+    'message', format('Booked %s with %s on %s.',
+      v_svc.name, v_dentist_name, to_char(p_start_local, 'FMDay, FMMonth FMDD "at" FMHH12:MI AM'))
+  );
+end;
+$$;
+
+create or replace function public.get_patient_appointments(p_phone text)
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  with settings as (
+    select c.timezone as tz from public.clinic_settings c where c.id
+  ),
+  p as (
+    select pt.* from public.patients pt where pt.phone_key = public.phone_key(p_phone)
+  )
+  select case
+    when not exists (select 1 from p) then
+      jsonb_build_object('found', false, 'message', 'No patient record found for this phone number.')
+    else jsonb_build_object(
+      'found', true,
+      'patient', (select jsonb_build_object('id', p.id, 'full_name', p.full_name) from p),
+      'upcoming_appointments', coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'appointment_id', a.id,
+            'service', s.name,
+            'dentist', d.full_name,
+            'start_local', to_char(a.starts_at at time zone settings.tz, 'YYYY-MM-DD HH24:MI'),
+            'when', to_char(a.starts_at at time zone settings.tz, 'FMDay, FMMonth FMDD "at" FMHH12:MI AM')
+          ) order by a.starts_at)
+        from public.appointments a
+        join p on p.id = a.patient_id
+        join public.services s on s.id = a.service_id
+        join public.dentists d on d.id = a.dentist_id
+        cross join settings
+        where a.status = 'booked' and a.starts_at > now()
+      ), '[]'::jsonb)
+    )
+  end;
+$$;
+
+-- The phone must match the appointment's patient, so a caller cannot cancel someone else's visit
+create or replace function public.cancel_appointment(p_appointment_id uuid, p_phone text)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+begin
+  update public.appointments a
+  set status = 'cancelled', updated_at = now()
+  from public.patients p
+  where a.id = p_appointment_id
+    and p.id = a.patient_id
+    and p.phone_key = public.phone_key(p_phone)
+    and a.status = 'booked';
+
+  if not found then
+    return jsonb_build_object('success', false, 'message', 'I could not find an active appointment for this phone number.');
+  end if;
+  return jsonb_build_object('success', true, 'message', 'The appointment has been cancelled.');
+end;
+$$;
+
+-- Moves an appointment, preferring the same dentist. The old slot is only released if the new one books.
+create or replace function public.reschedule_appointment(
+  p_appointment_id uuid,
+  p_phone text,
+  p_new_start_local timestamp
+)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_old record;
+  v_result jsonb;
+begin
+  select a.id, a.dentist_id, a.notes, a.vapi_call_id, p.full_name, p.phone, s.name as service_name
+  into v_old
+  from public.appointments a
+  join public.patients p on p.id = a.patient_id
+  join public.services s on s.id = a.service_id
+  where a.id = p_appointment_id
+    and p.phone_key = public.phone_key(p_phone)
+    and a.status = 'booked'
+  for update of a;
+
+  if not found then
+    return jsonb_build_object('success', false, 'message', 'I could not find an active appointment for this phone number.');
+  end if;
+
+  -- Free the old slot so the new time may overlap it
+  update public.appointments set status = 'cancelled', updated_at = now() where id = v_old.id;
+
+  v_result := public.book_appointment(v_old.full_name, v_old.phone, v_old.service_name, p_new_start_local, v_old.dentist_id, v_old.notes, v_old.vapi_call_id);
+  if not (v_result ->> 'success')::boolean then
+    v_result := public.book_appointment(v_old.full_name, v_old.phone, v_old.service_name, p_new_start_local, null, v_old.notes, v_old.vapi_call_id);
+  end if;
+
+  if not (v_result ->> 'success')::boolean then
+    update public.appointments set status = 'booked', updated_at = now() where id = v_old.id;
+    return v_result;
+  end if;
+
+  return v_result || jsonb_build_object('message', 'Rescheduled. ' || (v_result ->> 'message'));
+end;
+$$;
+
+revoke execute on function public.phone_key(text) from public, anon, authenticated;
+grant execute on function public.phone_key(text) to service_role;
