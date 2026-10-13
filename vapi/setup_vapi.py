@@ -19,8 +19,8 @@ EVENTS_URL = "https://annask1.app.n8n.cloud/webhook/vapi-events"
 # Swap these if a test call shows a problem
 MODEL = {"provider": "anthropic", "model": "claude-haiku-5-5", "temperature": 0.3}
 TRANSCRIBER = {"provider": "deepgram", "model": "nova-3", "language": "en"}
-# Vapi's own low-latency voice (Indian-English female) streams more smoothly than Azure
-VOICE = {"provider": "vapi", "voiceId": "Naina", "version": 2}
+# Vapi's Naina v2 voice produced no audible audio in web calls (2026-10-13), so keep Azure
+VOICE = {"provider": "azure", "voiceId": "en-IN-NeerjaNeural"}
 
 # Background noise was being heard as the caller speaking, which cut Ayesha off
 # mid-sentence (3 of 13 replies in a 2026-10-13 test call). Filter noise and only
