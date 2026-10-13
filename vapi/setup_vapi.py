@@ -22,14 +22,9 @@ TRANSCRIBER = {"provider": "deepgram", "model": "nova-3", "language": "en"}
 # Vapi's Naina v2 voice produced no audible audio in web calls (2026-10-13), so keep Azure
 VOICE = {"provider": "azure", "voiceId": "en-IN-NeerjaNeural"}
 
-# Background noise was being heard as the caller speaking, which cut Ayesha off
-# mid-sentence (3 of 13 replies in a 2026-10-13 test call). Filter noise and only
-# let real speech of 2+ words interrupt her.
-NOISE_SETTINGS = {
-    "backgroundSound": "off",
-    "backgroundSpeechDenoisingPlan": {"smartDenoisingPlan": {"enabled": True}},
-    "stopSpeakingPlan": {"numWords": 2, "voiceSeconds": 0.3, "backoffSeconds": 1.0},
-}
+# Tried 2026-10-13: backgroundSpeechDenoisingPlan + backgroundSound "off" + stopSpeakingPlan
+# made web calls silent (0 TTS characters), so none are set. Re-add one at a time if needed.
+NOISE_SETTINGS: dict = {}
 # Wait longer before replying when the caller is mid-number, so a phone number
 # spoken with pauses is not cut off after a few digits
 START_SPEAKING_PLAN = {
