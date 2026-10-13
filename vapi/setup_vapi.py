@@ -31,6 +31,15 @@ START_SPEAKING_PLAN = {
     },
 }
 
+# Vapi speaks these itself while a tool runs. The model is told to call tools without
+# speaking first: a spoken preamble in the same turn as a tool call left calls stuck
+# with "Tool Result Still Pending" and no reply (2026-10-13 test calls).
+TOOL_MESSAGES = [
+    {"type": "request-start", "content": "One moment, let me check that for you.", "blocking": False},
+    {"type": "request-response-delayed", "content": "Sorry, still checking, just a second.", "timingMilliseconds": 4000},
+    {"type": "request-failed", "content": "Sorry, I couldn't reach our booking system just now."},
+]
+
 FIRST_MESSAGE = "Hello, thank you for calling Airways Dental Clinic. This is Ayesha. How can I help you today?"
 
 TOOLS = [
@@ -153,6 +162,7 @@ def main():
         body = {
             "function": tool,
             "server": {"url": TOOLS_URL, "headers": server_headers, "timeoutSeconds": 20},
+            "messages": TOOL_MESSAGES,
         }
         existing = ids["tools"].get(tool["name"])
         if existing:
@@ -178,6 +188,7 @@ def main():
         "startSpeakingPlan": START_SPEAKING_PLAN,
         "server": {"url": EVENTS_URL, "headers": server_headers},
         "serverMessages": ["end-of-call-report"],
+        "analysisPlan": {"summaryPlan": {"enabled": True}},
         "maxDurationSeconds": 900,
     }
     if ids.get("assistant"):
