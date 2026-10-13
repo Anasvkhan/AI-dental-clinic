@@ -19,7 +19,17 @@ EVENTS_URL = "https://annask1.app.n8n.cloud/webhook/vapi-events"
 # Swap these if a test call shows a problem
 MODEL = {"provider": "anthropic", "model": "claude-haiku-5-5", "temperature": 0.3}
 TRANSCRIBER = {"provider": "deepgram", "model": "nova-3", "language": "en"}
-VOICE = {"provider": "azure", "voiceId": "en-IN-NeerjaNeural"}
+# Vapi's own low-latency voice (Indian-English female) streams more smoothly than Azure
+VOICE = {"provider": "vapi", "voiceId": "Naina", "version": 2}
+
+# Background noise was being heard as the caller speaking, which cut Ayesha off
+# mid-sentence (3 of 13 replies in a 2026-10-13 test call). Filter noise and only
+# let real speech of 2+ words interrupt her.
+NOISE_SETTINGS = {
+    "backgroundSound": "off",
+    "backgroundSpeechDenoisingPlan": {"smartDenoisingPlan": {"enabled": True}},
+    "stopSpeakingPlan": {"numWords": 2, "voiceSeconds": 0.3, "backoffSeconds": 1.0},
+}
 # Wait longer before replying when the caller is mid-number, so a phone number
 # spoken with pauses is not cut off after a few digits
 START_SPEAKING_PLAN = {
@@ -186,6 +196,7 @@ def main():
         "transcriber": TRANSCRIBER,
         "voice": VOICE,
         "startSpeakingPlan": START_SPEAKING_PLAN,
+        **NOISE_SETTINGS,
         "server": {"url": EVENTS_URL, "headers": server_headers},
         "serverMessages": ["end-of-call-report"],
         "analysisPlan": {"summaryPlan": {"enabled": True}},
