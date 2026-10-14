@@ -196,6 +196,8 @@ def main():
         "serverMessages": ["end-of-call-report"],
         "analysisPlan": {"summaryPlan": {"enabled": True}},
         "maxDurationSeconds": 900,
+        # Spoken in full before hanging up, so the goodbye is not cut off
+        "endCallMessage": "Thank you for calling Airways Dental Clinic. Goodbye!",
     }
     if ids.get("assistant"):
         call("PATCH", f"/assistant/{ids['assistant']}", api_key, assistant)

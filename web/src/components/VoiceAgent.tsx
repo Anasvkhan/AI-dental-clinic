@@ -40,6 +40,15 @@ export default function VoiceAgent() {
       }
     });
     vapi.on("error", (err) => {
+      // When Ayesha hangs up, the SDK reports "Meeting ended due to ejection". That is a
+      // normal end of call, not a failure.
+      const text = JSON.stringify(err ?? "").toLowerCase();
+      if (text.includes("ejection") || text.includes("meeting has ended")) {
+        setStatus("ended");
+        setSpeaking(false);
+        setVolume(0);
+        return;
+      }
       console.error("Vapi error", err);
       setError("The call could not continue. Please try again, or check your microphone.");
       setStatus("error");
