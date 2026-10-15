@@ -17,7 +17,10 @@ TOOLS_URL = "https://annask1.app.n8n.cloud/webhook/vapi-tools"
 EVENTS_URL = "https://annask1.app.n8n.cloud/webhook/vapi-events"
 
 # Swap these if a test call shows a problem
-MODEL = {"provider": "anthropic", "model": "claude-haiku-5-5", "temperature": 0.3}
+# Claude Haiku 5.5 on Vapi often spoke a sentence and called a tool in the same turn;
+# Vapi then left the tool result "pending" and the call died on silence (2026-10-13/15).
+# OpenAI models on Vapi call tools without a spoken preamble.
+MODEL = {"provider": "openai", "model": "gpt-4.1", "temperature": 0.3}
 TRANSCRIBER = {"provider": "deepgram", "model": "nova-3", "language": "en"}
 # Vapi's Naina v2 voice produced no audible audio in web calls (2026-10-13), so keep Azure
 VOICE = {"provider": "azure", "voiceId": "en-IN-NeerjaNeural"}
